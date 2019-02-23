@@ -7,6 +7,6 @@ This code uses a corpus of text gathered from online Fenn quotes, and builds a Q
 
 It may not be necessary to have an 80 character key, as Kile has hinted in her MysteriousWritings.com forums.
 
-This has not cracked the Vigenere cipher / Final Transpose step. I have included the output file from one 25 hour compututation run, in which 322
+This has not cracked the Vigenere cipher / Final Transpose step. I have included the output file from one 25 hour compututation run, in which 32,200,000,000 attacks with an 8 core processer, hoping to happen upon the lucky key. There are 1.5 x 10^113 possible keys.
 
 This uses OpenMP to speed up the attack.
