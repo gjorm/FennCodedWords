@@ -10,3 +10,5 @@ This has not cracked the Vigenere cipher / Final Transpose step. I have included
 This uses OpenMP to speed up the attack.
 
 2019-04-06 - In recent update from Kile, the key is hinted at being 52 characters in length. This code has been updated to reflect that. Also this code no longer uses Quadgrams to measure fitness (it still uses them to generate the key), and now uses the Chi Squared Test, which is faster and actually yields better results. Instead of using a larger natural English letter frequency, this code calculates the Fenn letter frequency from the Fenn corpus.txt file.
+
+Line 170 of main.cpp contains the value that limits the number of iterations to run. It is currently set to 30000000 to allow for testing.
