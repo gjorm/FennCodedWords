@@ -5,7 +5,7 @@ In the book "Armchair Treasure Hunts" by Jenny Kile, there is an 80 numeral code
 
 This code uses a corpus of text gathered from online Fenn quotes, and builds a QuadGram database. These quadgrams are used to both score the usefulness of the key, as well as the plaintext it has decrypted. Additionally, instead of brute forcing through every possible character in the key, the code builds an 80 character key using randomly selected quadgrams from a hash table, instead of iterating through all possible k-permutations with repitition.
 
-This has not cracked the Vigenere cipher / Final Transpose step. I have included the output file from one 25 hour compututation run, in which 32,200,000,000 attacks with an 8 core processer, hoping to happen upon the lucky key. There are 1.5 x 10^113 possible keys.
+This has not cracked the Vigenere cipher / Final Transpose step. I have included the output file from one 25 hour compututation run, with 32,200,000,000 attacks with an 8 core processer, hoping to happen upon the lucky key. There are 3.7 x 10^73 possible keys.
 
 This uses OpenMP to speed up the attack.
 
