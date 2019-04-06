@@ -10,6 +10,7 @@
 #include <cmath>
 #include <utility>
 #include <omp.h>
+#include <cstring>
 
 using namespace std;
 
@@ -46,13 +47,14 @@ bool operator < (const QuadGram &lhs, const QuadGram &rhs) {
 
 class DecryptCandidate {
 public:
-	long long score;
+	double keyScore;
+	double plainScore;
 	string text;
 	string key;
 };
 
 bool operator < (const DecryptCandidate &lhs, const DecryptCandidate &rhs) {
-	return lhs.score > rhs.score; //hack to get quick reverse ordered sort
+	return lhs.plainScore < rhs.plainScore;
 }
 
 
@@ -65,12 +67,17 @@ string ApplyFennTranspose(const string &in, const int(&order)[80]);
 string Decrypt(const string &cipher, const string &key);
 long long ScoreCandidate(const string &in, unordered_map<string, QuadGram> &gram);
 long long FinalScore(const string &transposed, const string &key, unordered_map<string, QuadGram> &gram);
+double ChiSqTest(const string &in, const double(&counts)[26], bool plain);
+
 
 int main() {
 	const string FennCipher = "SVRWYULOKKOZMIEAYULFUTIITYWBLBHKAVCAZUAUMWXCLLQFRMJMYPJLSVLCUSOKLLICTXBXACUHRBVG";
 	const int FennTrans[80] = { 41,10,73,22,80,28,76,6,32,53,61,19,1,36,56,23,65,40,13,67,29,2,21,45,39,3,79,51,49,24,
 		27,11,17,69,4,71,50,5,30,57,25,7,60,35,12,20,8,70,52,26,62,42,14,54,31,9,33,72,55,37,
 		15,58,75,66,43,74,68,59,16,46,34,18,77,63,44,64,78,38,47,48 };
+
+    double FennLetterFreqs[26]; //custom fenn letter frequency distribution based on corpus.txt
+    memset(FennLetterFreqs, 0, 26 * sizeof(double));
 
 	string opt;
 	ifstream quadGramIn;
@@ -79,7 +86,7 @@ int main() {
 	unordered_map<string, QuadGram> dataGrams;
 
 	if (quadGramIn.is_open()) {
-		cout << "QuadGrams.txt file found." << endl << "Do you wish to build a new QuadGram database from corpus.txt?" << endl << "  (Y or y to agree. Type anything else to skip)" << endl;
+		cout << "QuadGrams.txt file found." << endl << "Do you wish to generate a NEW QuadGram file from corpus.txt?" << endl << "  (Y or y to agree. Type anything else to skip)" << endl;
 		cin >> opt;
 		if (opt == "Y" || opt == "y") {
 			cout << "Building new QuadGram database..." << endl;
@@ -133,9 +140,34 @@ int main() {
 		}
 	}
 
+
+	///// Build custom Fenn letter frequency count based on corpus.txt
+	cout << "Building custom Fenn letter frequency based on corpus.txt" << endl;
+    ifstream corp;
+    char f;
+    double ctr = 0.0;
+    corp.open("corpus.txt");
+    if(corp.is_open()) {
+        while(corp.good()) {
+            f = corp.get();
+            if(IsAlphabetic(f)) {
+                FennLetterFreqs[toupper(f) - 'A'] += 1.0;
+                ctr += 1.0;
+            }
+        }
+    }
+
+    for(int i = 0; i < 26; i++) {
+        FennLetterFreqs[i] = FennLetterFreqs[i] / ctr;
+        cout << (char)('A' + i) << ": " << FennLetterFreqs[i] << endl;
+    }
+    corp.close();
+    /////
+
 	vector<DecryptCandidate> candList;
 	int numThreads = 0;
-	long long limit = 32200000000;// 3220000000 = 9235 seconds
+	//determine how many iterations to run to
+	long long limit = 30000000;// 3220000000 = 9235 seconds
 	unsigned int seed = (unsigned int)time(0);
 	cout << "Initial seed: " << seed << endl;
 	unordered_map<string, QuadGram>::iterator gi;
@@ -162,9 +194,10 @@ int main() {
 		string test, key;
 		DecryptCandidate cand;
 		vector<DecryptCandidate> _candList;
-		long long kScore = 0;
-		int num, most = 0;
+		double kScore = 0, pScore = 0;
+		int num;
 		vector<string>::iterator dgi;
+		double least = 1000;
 
 #pragma omp for
 		for (long long i = 0; i < limit; i++) {
@@ -173,44 +206,55 @@ int main() {
 
 
 			key = "";
-			for (int j = 0; j < 20; j++) {
+			//generate a 52 character key
+			for (int j = 0; j < 13; j++) {
 				dgi = dataGramList.begin();
 				num = dist(rando);
 				advance(dgi, num);
 				key += *dgi;
 			}
 
-			//find the score of the key. the key should score high and if it doesnt, we shouldnt waste any more processing time
-			kScore = ScoreCandidate(key, dataGrams);
-			if (kScore > 400) {
+            //flesh out the full 80 character key needed
+			key += key;
+			key.erase(key.begin() + 80, key.end());
+
+			//find the score of the key. the key should score reasonably high and if it doesnt, we shouldnt waste any more processing time
+			//kScore = ScoreCandidate(key, dataGrams);
+			kScore = ChiSqTest(key, FennLetterFreqs, false);
+			if (kScore < 500) {
 				test = Decrypt(FennCipher, key);
 				if (test != "") {
 					test = ApplyFennTranspose(test, FennTrans);
 
-					//perform final scoring, in which both the key and the plaintext must score high, but in the same position as well
-					cand.score = ScoreCandidate(test, dataGrams) + kScore;
+					//perform final scoring, in which both the key and the plaintext must score high,
+					pScore = ChiSqTest(test, FennLetterFreqs, true);
+					cand.plainScore = pScore;
 					cand.text = test;
+					cand.keyScore = kScore;
 					cand.key = key;
 
-					if(_candList.size() < 1) {
-                        _candList.push_back(cand);
-					} else {
-                        if(cand.score >= most) {
+					if(abs(pScore - kScore) < 20) {//the key and the plaintext must be similarly scored
+                        if(_candList.size() < 1) {
                             _candList.push_back(cand);
-                            most = cand.score;
+                        } else {
+                            if(cand.plainScore <= least) {
+                                _candList.push_back(cand);
+                                least = cand.plainScore;
 
-                            if (_candList.size() > 1500) {
-                                sort(_candList.begin(), _candList.end());
-                                _candList.erase(_candList.begin() + (_candList.size() / 2),_candList.end());
+                                if (_candList.size() > 1500) {
+                                    sort(_candList.begin(), _candList.end());
+                                    _candList.erase(_candList.begin() + (_candList.size() / 2),_candList.end());
+                                }
                             }
                         }
 					}
+
 
 				}
 			}
 
 
-		}
+		}//end omp for
 
 
 #pragma omp critical
@@ -229,12 +273,15 @@ int main() {
 	out += '\n';
 
 	for (int i = 0; i < (int)candList.size(); i++) {
-		out += "Score: ";
-		out += to_string(candList[i].score);
+		out += "Plain Text Score: ";
+		out += to_string(candList[i].plainScore);
 		out += '\n';
 		out += "Plaintext: ";
 		out += '\n';
 		out += candList[i].text;
+		out += '\n';
+		out += "Key Score: ";
+		out += to_string(candList[i].keyScore);
 		out += '\n';
 		out += "Key: ";
 		out += '\n';
@@ -458,4 +505,71 @@ long long FinalScore(const string &transposed, const string &key, unordered_map<
 	result = addA + addB;
 
 	return result;
+}
+
+double ChiSqTest(const string &in, const double(&counts)[26], bool plain) {
+    double freqs[26];
+    double scores[26];
+    double length;
+
+    //if this is plaintext use the full 80 letter phrase length
+    if(plain)
+        length = 80;
+    else
+        length = 52;
+
+    /*
+    //use cornell letter frequencies (consider using a custom fenn frequency?)
+    freqs[0] = 0.0812 * length; //A
+    freqs[1] = 0.0149 * length; //B
+    freqs[2] = 0.0271 * length; //C
+    freqs[3] = 0.0432 * length; //D
+    freqs[4] = 0.1202 * length; //E
+    freqs[5] = 0.0230 * length; //F
+    freqs[6] = 0.0203 * length; //G
+    freqs[7] = 0.0592 * length; //H
+    freqs[8] = 0.0731 * length; //I
+    freqs[9] = 0.0010 * length; //J
+    freqs[10] = 0.0069 * length; //K
+    freqs[11] = 0.0398 * length; //L
+    freqs[12] = 0.0261 * length; //M
+    freqs[13] = 0.0695 * length; //N
+    freqs[14] = 0.0768 * length; //O
+    freqs[15] = 0.0182 * length; //P
+    freqs[16] = 0.0011 * length; //Q
+    freqs[17] = 0.0602 * length; //R
+    freqs[18] = 0.0628 * length; //S
+    freqs[19] = 0.0910 * length; //T
+    freqs[20] = 0.0288 * length; //U
+    freqs[21] = 0.0111 * length; //V
+    freqs[22] = 0.0209 * length; //W
+    freqs[23] = 0.0017 * length; //X
+    freqs[24] = 0.0211 * length; //Y
+    freqs[25] = 0.0007 * length; //Z
+    */
+
+    //use fenn letter frequencies from corpus.txt
+    for(int i = 0; i < 26; i++) {
+        freqs[i] = counts[i] * length;
+    }
+
+    //initialize all as 0
+    memset(scores, 0, 26 * sizeof(double));
+
+    //get letter counts in the input phrase
+    if(in.size() != 80)
+        cerr << "ChiSqTest() was given a wrongly sized input string: " << in << endl;
+    else {
+        for(int i = 0; i < length; i++) {
+            scores[toupper(in[i]) - 'A'] += 1.0;
+        }
+    }
+
+    //calculate chi squared value
+    double result = 0;
+    for(int i = 0; i < 26; i++) {
+        result += (pow(scores[i] - freqs[i], 2) / freqs[i]);
+    }
+
+    return result;
 }
